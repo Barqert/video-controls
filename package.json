@@ -1,0 +1,10 @@
+{
+  "name": "video-controls",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone mpv-style web video controls",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "test:browser": "node tests/browser.cjs"
+  }
+}

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video Controls — Settings</title>
+  <link rel="stylesheet" href="options.css">
+  <script defer src="src/config.js"></script>
+  <script defer src="src/input.js"></script>
+  <script defer src="src/options.js"></script>
+</head>
+<body>
+<main>
+  <h1>Video Controls</h1>
+  <p><a href="https://mpv.io/manual/stable/#command-interface">mpv-style</a> syntax for keybindings config</p>
+  <form id="settings">
+    <div class="actions"><button type="submit" id="save" disabled>Save (applies for already open pages as well)</button>
+    <button type="button" id="defaults" disabled>Load default shortcuts</button></div>
+    <p id="status" role="status" aria-live="polite">Loading shortcuts…</p>
+    <pre id="errors" role="alert" hidden></pre>
+    <label for="common">Common — shortcuts for both Fullscreen and non-Fullscreen mode</label>
+    <textarea id="common" spellcheck="false" rows="16" aria-describedby="editor-help"></textarea>
+    <label for="fullscreen">Fullscreen only</label>
+    <p class="field-help" id="fullscreen-help">Overrides Common while in fullscreen.</p>
+    <textarea id="fullscreen" spellcheck="false" rows="6" aria-describedby="editor-help fullscreen-help"></textarea>
+    <label for="windowed">Outside fullscreen only</label>
+    <p class="field-help" id="fullscreen-help">Overrides Common while not in fullscreen.</p>
+    <textarea id="windowed" spellcheck="false" rows="6" aria-describedby="editor-help windowed-help"></textarea>
+  </form>
+  <section aria-labelledby="syntax">
+    <h2 id="syntax">How to write shortcuts</h2>
+    <p>These shortcuts use part of <a href="https://mpv.io/manual/stable/#command-interface" target="_blank" rel="noreferrer">mpv’s input.conf format</a>. The commands supported here are listed below.</p>
+    <pre># Lines starting with # are comments.
+Alt+p cycle pause         # Pause or play
+Alt+m cycle mute          # Sound on or off
+Alt+n seek 5              # Skip forward 5 seconds
+Alt+b seek -5             # Go back 5 seconds
+Alt+] multiply speed 1.1  # Play 10% faster
+Alt+r reset-all        # Reset the picture</pre>
+    <p>Put <code>;</code> between commands to run them with one key:</p>
+    <pre>Alt+0 set speed 1; set video-zoom 0</pre>
+    <h3>Keys</h3>
+    <p>Use letters, numbers, or symbols. Add <code>Ctrl+</code>, <code>Alt+</code>, or <code>Shift+</code> to combine keys. <code>Meta+</code> and <code>Super+</code> also work for the Windows/Command key.</p>
+    <p>For example, <code>Alt+LEFT</code> means Alt and the left arrow. <code>Alt++</code> means Alt and the plus key. Capital letters include Shift: <code>A</code> is Shift+A, while <code>a</code> is A without Shift.</p>
+    <details>
+      <summary>All key names and keyboard details</summary>
+      <p>Arrow keys: <code>LEFT RIGHT UP DOWN</code>.</p>
+      <p>Other keys: <code>SPACE ENTER ESC TAB BS BACKSPACE DEL INS HOME END PGUP PGDWN</code>, and <code>F1</code> through <code>F24</code>. <code>ESCAPE</code> also works for Escape.</p>
+      <p>Number pad: <code>KP0</code> through <code>KP9</code>, plus <code>KP_ADD KP_SUBTRACT KP_MULTIPLY KP_DIVIDE KP_ENTER KP_DEC</code>.</p>
+      <p>You can write named keys like LEFT in lowercase too. Letter keys follow your keyboard layout. Symbols that need Shift use a standard US keyboard layout.</p>
+      <p>For compatibility with the old shortcuts, <code>=</code> also matches number-pad plus, and <code>-</code> matches number-pad minus, without Shift. Use the KP names to give number-pad keys their own shortcuts.</p>
+    </details>
+    <h3>Commands</h3>
+    <p>Replace <code>PROPERTY</code> with a setting such as <code>speed</code> or <code>video-zoom</code>. Parts in square brackets are optional; leave out the brackets when you type a command.</p>
+    <table>
+      <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>set PROPERTY VALUE</code></td><td>Set a value. Example: <code>set speed 1</code> returns to normal speed. Use <code>yes</code> or <code>no</code> for pause and mute.</td></tr>
+        <tr><td><code>add PROPERTY [AMOUNT]</code></td><td>Add a number. Use a negative number to subtract. If you leave out the amount, it adds 1.</td></tr>
+        <tr><td><code>multiply PROPERTY FACTOR</code></td><td>Multiply a value. Example: <code>multiply speed 2</code> doubles playback speed.</td></tr>
+        <tr><td><code>cycle PROPERTY [up|down]</code></td><td>Switch pause or mute on and off. Either direction does the same thing.</td></tr>
+        <tr><td><code>cycle-values [!reverse] PROPERTY VALUE…</code></td><td>Move through a list of values, then start again. Example: <code>cycle-values speed 1 1.5 2</code>. Add <code>!reverse</code> to go backward.</td></tr>
+        <tr><td><code>vf toggle hflip</code><br><code>vf toggle vflip</code></td><td>Flip the picture sideways or upside down. Replace <code>toggle</code> with <code>add</code> to turn the flip on, or <code>remove</code> to turn it off.</td></tr>
+        <tr><td><code>seek AMOUNT [FLAGS]</code></td><td>Skip forward or backward by a number of seconds. Example: <code>seek -10</code> goes back 10 seconds. More seek options are below.</td></tr>
+        <tr><td><code>ignore</code></td><td>Make a key do nothing. Use this in a fullscreen-only or outside-fullscreen box to turn off a Common shortcut in that mode.</td></tr>
+      </tbody>
+    </table>
+    <h3>Settings you can change</h3>
+    <table>
+      <thead><tr><th>Property</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>video-pan-x</code><br><code>video-pan-y</code></td><td>Move sideways or up/down. A change of 0.1 moves the picture by 10% of its width or height.</td></tr>
+        <tr><td><code>video-zoom</code></td><td>Zoom in or out. 0 is normal size, 1 is twice as large, and −1 is half as large.</td></tr>
+        <tr><td><code>video-rotate</code></td><td>Rotate by a number of degrees. For example, 90 is a quarter turn.</td></tr>
+        <tr><td><code>speed</code></td><td>Playback speed. 1 is normal, 2 is twice as fast, and 0.5 is half speed.</td></tr>
+        <tr><td><code>volume</code></td><td>Sound level from 0 to 100.</td></tr>
+        <tr><td><code>pause</code><br><code>mute</code></td><td>Use <code>yes</code> for on and <code>no</code> for off, or use <code>cycle</code> to switch between them.</td></tr>
+      </tbody>
+    </table>
+    <h2>Extra commands added by this extension</h2>
+    <h3>Multiply a value, then ease back</h3>
+    <pre>Alt+b multiply-decay speed 2 1</pre>
+    <p>This doubles playback speed, then gradually brings it back to where it started. After one second, half of the extra speed is gone. After another second, half of what remains is gone.</p>
+    <p>The format is <code>multiply-decay PROPERTY X Y</code>:</p>
+    <ul>
+      <li><strong>X is the multiplier.</strong> Use 2 to double a value, or 0.5 to halve it.</li>
+      <li><strong>Y controls how slowly it returns.</strong> It is the number of seconds for half the change to fade. A bigger number makes the effect last longer.</li>
+      <li>Both numbers must be greater than zero.</li>
+    </ul>
+    <p>You can press the key again while the effect is running. The effects multiply together and each fades on its own. For example, two fresh 2× effects give 4×.</p>
+    <details>
+      <summary>Exact timing and what happens when you change a value</summary>
+      <p>Y is called the half-life. After t seconds, each effect multiplies the value by <code>1 + (X − 1) × 2^(−t/Y)</code>. With X=2 and Y=1, that is 2× at first, 1.5× after one second, and 1.25× after two seconds.</p>
+      <p>Two 2× effects started together give 2.25× after one half-life. Each effect ends after 20 half-lives, so the value returns exactly to its starting value. The setting’s normal limits still apply.</p>
+      <p><code>add</code> and <code>multiply</code> change the value the effect returns to. <code>set</code> and <code>cycle-values</code> cancel effects on that setting. Changing speed or volume using the site’s own controls also cancels effects on that setting.</p>
+      <p>Multiplying zero still gives zero. To use this on <code>video-zoom</code>, first set zoom to something other than zero.</p>
+      <p>Time keeps counting while playback is paused. A background tab catches up when the browser starts drawing it again.</p>
+    </details>
+    <h3>Reset the picture</h3>
+    <pre>Alt+BACKSPACE reset-all</pre>
+    <p>Undo moves, zoom, rotation, and flips. This also ends their temporary effects. Speed, sound, and pause stay as they are.</p>
+    <!-- Keep less common syntax available without making the first read harder. -->
+    <details>
+      <summary>More syntax: seeking, held keys, quotes, and limits</summary>
+      <h3>Seeking</h3>
+      <p><code>seek 10 relative</code> goes forward 10 seconds. <code>seek 10 absolute</code> jumps to 10 seconds from the start.</p>
+      <p><code>seek 10 relative-percent</code> goes forward by 10% of the video’s length. <code>seek 50 absolute-percent</code> jumps to the middle. These need a video with a known length.</p>
+      <p>You can add <code>+exact</code> or <code>+keyframes</code>, for example <code>seek 10 relative+exact</code>. Keyframe seeking uses the browser’s fast seek feature when available, or regular seeking otherwise. The browser decides how precisely it can seek.</p>
+      <h3>Holding a key</h3>
+      <p>By default, <code>add</code>, <code>multiply</code>, and <code>seek</code> keep running while you hold the key. Other commands run once per press.</p>
+      <p>Put <code>repeatable</code> before a command to make it repeat, or <code>nonrepeatable</code> to stop it repeating. If a line has several commands, the first one decides whether the whole line repeats.</p>
+      <p><code>no-osd</code> is accepted for mpv compatibility. It has no effect here because this extension does not show command messages over the video.</p>
+      <h3>Quotes and comments</h3>
+      <p>Blank lines are fine. A <code>#</code> starts a comment. You can put values inside single or double quotes. To include <code>#</code> or <code>;</code> as part of a value, quote it or put a backslash before it. Outside single quotes, a backslash makes the next character part of the value.</p>
+      <h3>Lists of values</h3>
+      <p>If the current value is missing from a <code>cycle-values</code> list, the command starts at the first value. With <code>!reverse</code>, it starts at the last value.</p>
+      <h3>Value limits</h3>
+      <p>Pan: −100 to 100. Zoom: −10 to 10. Rotation: −360,000 to 360,000 degrees. Speed: 0.0625 to 16. Volume: 0 to 100. Values outside these ranges stop at the nearest limit. Your browser may allow a smaller range for speed or volume.</p>
+    </details>
+    <details>
+      <summary>Player compatibility</summary>
+      <p>Normal HTML videos work, including videos inside open shadow roots (a way sites group parts of a page). Videos inside closed shadow roots, browser-internal pages, and separate picture-in-picture windows are not supported.</p>
+    </details>
+  </section>
+</main>
+</body>
+</html>

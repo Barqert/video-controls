@@ -1,0 +1,35 @@
+/* Use full-size text throughout, including helpers and code examples. */
+:root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+/* Chrome's extension-page stylesheet shrinks body text unless we override it. */
+body { margin: 0; font: inherit; background: light-dark(#f3f5f8, #16191f); color: light-dark(#172033, #e5e9f0); }
+main { max-width: 1200px; margin: 0 auto; padding: 32px; }
+h1 { margin-bottom: 12px; line-height: 1.2; }
+h2 { margin-top: 40px; line-height: 1.3; }
+h3 { margin-top: 28px; line-height: 1.4; }
+p, li { max-width: 75ch; }
+li + li { margin-top: 12px; }
+label { display: block; font-size: 1.15rem; font-weight: 650; margin: 20px 0 12px; }
+.field-help { margin: 0 0 12px; }
+textarea { box-sizing: border-box; width: 100%; resize: vertical; padding: 18px; border: 1px solid #8290a4; border-radius: 6px; font: 18px/1.65 ui-monospace, monospace; tab-size: 4; }
+.actions { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 24px; }
+button { padding: 12px 20px; font: inherit; cursor: pointer; border: 1px solid #8290a4; border-radius: 6px; }
+button[type=submit] { background: #2459b8; color: white; }
+button:disabled { opacity: .55; cursor: wait; }
+:focus-visible { outline: 3px solid #729eff; outline-offset: 3px; }
+section { border-top: 1px solid #8290a4; margin-top: 40px; }
+table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+th, td { text-align: left; vertical-align: top; padding: 5px 5px; border-bottom: 1px solid #8290a4; overflow-wrap: anywhere; }
+th:first-child { width: 40%; }
+code, pre { font-family: ui-monospace, monospace; font-size: 1em; overflow-wrap: anywhere; }
+pre { padding: 20px; background: light-dark(#e5eaf1, #232936); white-space: pre-wrap; border-radius: 6px; }
+/* Optional details keep the main guide short without hiding the full reference. */
+details { margin: 24px 0; padding: 18px 20px; border: 1px solid #8290a4; border-radius: 6px; }
+summary { cursor: pointer; font-weight: 650; }
+details[open] summary { margin-bottom: 20px; }
+#errors { color: light-dark(#a20f25, #ffb2bd); }
+a { color: light-dark(#174caa, #9ebeff); }
+@media (max-width: 640px) {
+    main { padding: 20px 16px; }
+    th, td { padding: 14px 8px; }
+    details, pre { padding: 16px; }
+}

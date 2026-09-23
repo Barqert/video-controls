@@ -1,0 +1,35 @@
+{
+  "name": "Video Controls",
+  "description": "Configurable mpv-style shortcuts for web videos, in and out of fullscreen.",
+  "version": "1.0.0",
+  "manifest_version": 3,
+  "permissions": [
+    "storage"
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "Video Controls settings"
+  },
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*/*"
+      ],
+      "js": [
+        "src/config.js",
+        "src/input.js",
+        "src/engine.js",
+        "src/content.js"
+      ],
+      "run_at": "document_end",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ]
+}
