@@ -4,7 +4,9 @@ VideoControls.config = {
     storageKey: 'inputConfigs',
     defaults: {
     "common": `LEFT    seek -5
-RIGHT    multiply-decay speed 4 0.5
+RIGHT    multiply-decay speed 3 1
+UP    seek  60
+DOWN  seek -60
 
 Alt+left  add video-pan-x -0.02
 Alt+right add video-pan-x  0.02
@@ -15,10 +17,12 @@ Alt+Shift+right add video-pan-x  0.005
 Alt+Shift+up    add video-pan-y -0.005
 Alt+Shift+down  add video-pan-y  0.005
 
+Alt+KP_ADD     add video-zoom   0.04
+Alt+KP_SUBTRACT     add video-zoom  -0.04
 Alt+=     add video-zoom   0.04
 Alt+-     add video-zoom  -0.04
-Alt++     add video-zoom   0.01 # Shift+Alt+=
-Alt+_     add video-zoom  -0.01 # Shift+Alt+-
+Alt++     add video-zoom   0.04 # Alt+Shift+= on some keyboards
+Alt+_     add video-zoom  -0.04 # Alt+Shift+- on some keyboards
 
 Ctrl+Alt+UP    set video-rotate 0
 Ctrl+Alt+RIGHT cycle-values video-rotate 0 90 180 270
@@ -31,8 +35,10 @@ Ctrl+Shift+LEFT     add video-rotate -3
 Ctrl+Shift+RIGHT    add video-rotate 3
 
 Alt+BACKSPACE reset-all
-    `,
-    "fullscreen": "",
+`,
+    "fullscreen": `WHEEL_UP add volume 5
+WHEEL_down add volume -5
+`,
     "windowed": ""
 }
 };

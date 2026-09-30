@@ -4,7 +4,23 @@
     const {config, input, engine} = VideoControls;
     const states = new Map();
     let bindings, preferredVideo, inheritedFullscreen = false, animation = null, storageRevision = 0;
-    const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+    function shadowRoot(element) {
+        if (!(element instanceof HTMLElement)) return null;
+        // Both browsers grant extensions access without changing attachShadow:
+        // Firefox exposes an element property; Chromium exposes a DOM API.
+        return element.shadowRoot || element.openOrClosedShadowRoot ||
+            chrome.dom?.openOrClosedShadowRoot?.(element) || null;
+    }
+    function fullscreenElement() {
+        let element = document.fullscreenElement || document.webkitFullscreenElement;
+        // document.fullscreenElement is retargeted to the host for shadow content.
+        while (element) {
+            const nested = shadowRoot(element)?.fullscreenElement;
+            if (!nested) break;
+            element = nested;
+        }
+        return element;
+    }
     const isFullscreen = () => Boolean(fullscreenElement() || inheritedFullscreen);
     function load(raw) {
         const parsed = {};
@@ -27,15 +43,53 @@
         if (storageRevision === initialRevision) load(result[config.storageKey]);
     }).catch(error => console.warn('Video Controls: could not load settings', error));
 
-    // Traverse open shadow roots as well as ordinary player containers.
-    function videosIn(root) {
-        const videos = [...root.querySelectorAll('video')];
-        if (root instanceof HTMLVideoElement) videos.unshift(root);
-        if (root.shadowRoot) videos.push(...videosIn(root.shadowRoot));
+    // Query each tree separately: DOM selectors do not cross shadow boundaries.
+    function elementsIn(root, selector) {
+        const elements = [...root.querySelectorAll(selector)];
+        if (root instanceof Element && root.matches(selector)) elements.unshift(root);
+        const ownShadow = shadowRoot(root);
+        if (ownShadow) elements.push(...elementsIn(ownShadow, selector));
         for (const element of root.querySelectorAll('*')) {
-            if (element.shadowRoot) videos.push(...videosIn(element.shadowRoot));
+            const nested = shadowRoot(element);
+            if (nested) elements.push(...elementsIn(nested, selector));
         }
-        return videos;
+        return elements;
+    }
+    const videosIn = root => elementsIn(root, 'video');
+    const parentElement = node => node.assignedSlot || node.parentElement || node.getRootNode()?.host;
+    function containsElement(container, element) {
+        for (let current = element; current; current = parentElement(current)) {
+            if (current === container) return true;
+        }
+        return false;
+    }
+    function activeElement() {
+        let element = document.activeElement;
+        while (element) {
+            const nested = shadowRoot(element)?.activeElement;
+            if (!nested) break;
+            element = nested;
+        }
+        return element;
+    }
+    function eventElements(event) {
+        const path = event.composedPath();
+        let element = path.find(node => node instanceof Element);
+        const keyboard = event.type === 'keydown';
+        if (keyboard) element = activeElement() || element;
+        // Closed roots hide their inner event path. Recover the focused element
+        // for keys, or hit-test inside each root for mouse input and overlays.
+        const visited = new Set();
+        while (element && !visited.has(element)) {
+            visited.add(element);
+            const root = shadowRoot(element);
+            const nested = keyboard ? root?.activeElement : root?.elementFromPoint(event.clientX, event.clientY);
+            if (!nested || nested === element) break;
+            element = nested;
+        }
+        const innerPath = [];
+        for (let node = element; node; node = parentElement(node)) innerPath.push(node);
+        return [...innerPath, ...path];
     }
     function visible(video) {
         const rect = video.getBoundingClientRect();
@@ -55,7 +109,7 @@
             b.getBoundingClientRect().width * b.getBoundingClientRect().height - a.getBoundingClientRect().width * a.getBoundingClientRect().height)[0];
     }
     document.addEventListener('pointerdown', event => {
-        preferredVideo = event.composedPath().find(node => node instanceof HTMLVideoElement) || preferredVideo;
+        preferredVideo = eventElements(event).find(node => node instanceof HTMLVideoElement) || preferredVideo;
     }, true);
     function stateFor(video) {
         if (!states.has(video)) {
@@ -63,6 +117,7 @@
                 model: engine.create({speed: video.playbackRate, volume: video.volume * 100, pause: video.paused, mute: video.muted}),
                 originals: null, last: {}
             });
+            observeVideoRoots();
         }
         return states.get(video);
     }
@@ -73,6 +128,42 @@
             else video.style.removeProperty(property);
         }
         state.originals = null;
+    }
+    // Web Audio routing cannot be undone, so it outlives per-video state and
+    // is created only when a delay is first requested.
+    const audioGraphs = new WeakMap();
+    function audioRoutable(video) {
+        // Cross-origin media without CORS, and encrypted media, would become permanently silent.
+        if (video.mediaKeys) return false;
+        if (video.srcObject) return true;
+        if (!video.currentSrc) return false;
+        const url = new URL(video.currentSrc, location.href);
+        return ['blob:', 'data:'].includes(url.protocol) || url.origin === location.origin || video.crossOrigin !== null;
+    }
+    function audioGraph(video) {
+        if (audioGraphs.has(video)) return audioGraphs.get(video);
+        if (!audioRoutable(video)) throw new Error('cross-origin or encrypted media cannot be routed through Web Audio');
+        const context = new AudioContext();
+        let source;
+        try { source = context.createMediaElementSource(video); }
+        catch (error) { context.close(); throw error; }
+        const graph = {context, delay: null};
+        const flush = () => {
+            // A new delay line drops audio buffered before a seek.
+            const delayTime = graph.delay?.delayTime.value ?? 0;
+            graph.delay?.disconnect();
+            source.disconnect();
+            graph.delay = new DelayNode(context, {maxDelayTime: engine.clamp('audio-delay', Infinity), delayTime});
+            source.connect(graph.delay).connect(context.destination);
+        };
+        // Freeze the delay line with the video so buffered audio neither leaks nor is lost.
+        const follow = () => (video.paused || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA ? context.suspend() : context.resume()).catch(() => {});
+        flush();
+        video.addEventListener('seeking', flush);
+        for (const type of ['play', 'playing', 'pause', 'waiting']) video.addEventListener(type, follow);
+        follow();
+        audioGraphs.set(video, graph);
+        return graph;
     }
     function syncMedia(video, state) {
         for (const [name, value] of Object.entries({speed: video.playbackRate, volume: video.volume * 100, pause: video.paused, mute: video.muted})) {
@@ -93,7 +184,10 @@
             }
             const scale = 2 ** values['video-zoom'];
             video.style.setProperty('transform-origin', 'center center', 'important');
-            video.style.setProperty('transform', `translate(${values['video-pan-x'] * 100}%, ${values['video-pan-y'] * 100}%) rotate(${values['video-rotate']}deg) scale(${scale * (m.flipX ? -1 : 1)}, ${scale * (m.flipY ? -1 : 1)})${state.baseTransform}`, 'important');
+            // CSS applies transforms right to left. Zoom the entire panned
+            // picture last, around the fixed center of the original video box.
+            // Keep flips inside translation so they do not reverse pan direction.
+            video.style.setProperty('transform', `scale(${scale}) translate(${values['video-pan-x'] * 100}%, ${values['video-pan-y'] * 100}%) rotate(${values['video-rotate']}deg) scale(${m.flipX ? -1 : 1}, ${m.flipY ? -1 : 1})${state.baseTransform}`, 'important');
         }
         for (const [property, name, desired] of [['playbackRate', 'speed', values.speed], ['volume', 'volume', values.volume / 100], ['muted', 'mute', m.base.mute]]) {
             if (video[property] !== desired) {
@@ -105,6 +199,14 @@
             }
             state.last[name] = name === 'volume' ? video[property] * 100 : video[property];
         }
+        const delay = values['audio-delay'];
+        if (Math.abs(delay - (audioGraphs.get(video)?.delay.delayTime.value ?? 0)) > 1e-6) {
+            try { audioGraph(video).delay.delayTime.value = delay; }
+            catch (error) {
+                engine.set(m, 'audio-delay', 0);
+                console.warn('Video Controls: cannot delay audio', error);
+            }
+        }
     }
     function cleanup(video, state) {
         restoreStyle(video, state);
@@ -114,7 +216,11 @@
                 try { video[property] = state.model.base[name] / (name === 'volume' ? 100 : 1); } catch { /* The media element may already be torn down. */ }
             }
         }
+        // A reattached video starts with fresh state, so its routing must be neutral too.
+        const graph = audioGraphs.get(video);
+        if (graph) graph.delay.delayTime.value = 0;
         states.delete(video);
+        observeVideoRoots();
     }
     function tick(now) {
         animation = null;
@@ -130,9 +236,24 @@
     function schedule() {
         if (animation === null && [...states.values()].some(state => engine.active(state.model))) animation = requestAnimationFrame(tick);
     }
-    new MutationObserver(() => {
+    const removalObserver = new MutationObserver(() => {
         for (const [video, state] of states) if (!video.isConnected) cleanup(video, state);
-    }).observe(document, {childList: true, subtree: true});
+    });
+    function observeVideoRoots() {
+        // Document observers cannot see removals inside shadow trees. Observe the
+        // roots containing controlled videos and release them when state is removed.
+        removalObserver.disconnect();
+        const roots = new Set([document]);
+        for (const video of states.keys()) {
+            let root = video.getRootNode();
+            while (root instanceof ShadowRoot) {
+                roots.add(root);
+                root = root.host.getRootNode();
+            }
+        }
+        for (const root of roots) removalObserver.observe(root, {childList: true, subtree: true});
+    }
+    observeVideoRoots();
 
     function seek(video, cmd) {
         const flags = (cmd.args[0] || 'relative').split('+');
@@ -146,21 +267,16 @@
         if (flags.includes('keyframes') && video.fastSeek) video.fastSeek(next);
         else video.currentTime = next;
     }
-    document.addEventListener('keydown', event => {
-        // Leave text editing, sliders, and IME composition to the page.
-        if (event.isComposing || event.composedPath().some(node => node instanceof Element &&
-            (node.matches('input, textarea, select, [role="textbox"], [role="slider"]') || node.isContentEditable))) return;
-        const binding = input.resolve(bindings, isFullscreen(), event);
-        if (!binding) return;
-        const video = target();
-        if (!video) return;
+    function editing(event) {
+        return event.isComposing || eventElements(event).some(node => node instanceof Element &&
+            (node.matches('input, textarea, select, [role="textbox"], [role="slider"]') || node.isContentEditable));
+    }
+    function execute(video, binding, scale = 1) {
         preferredVideo = video;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        if (event.repeat && !binding.commands[0].repeat) return;
         const state = stateFor(video), now = performance.now();
         syncMedia(video, state);
-        for (const cmd of binding.commands) {
+        for (const original of binding.commands) {
+            const cmd = input.scaleCommand(original, scale);
             try {
                 if (cmd.op === 'seek') seek(video, cmd);
                 else engine.execute(state.model, cmd, now);
@@ -173,21 +289,59 @@
         state.last.pause = video.paused;
         render(video, state, now);
         schedule();
+    }
+    const resolve = event => input.resolve(bindings, isFullscreen(), event);
+    document.addEventListener('keydown', event => {
+        // Leave text editing, sliders, and IME composition to the page.
+        if (editing(event)) return;
+        const binding = resolve(event);
+        if (!binding) return;
+        const video = target();
+        if (!video) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (event.repeat && !binding.commands[0].repeat) return;
+        execute(video, binding);
     }, true);
+    function mouseTarget(event) {
+        if (editing(event) || eventElements(event).some(node => node instanceof Element &&
+            node.matches('button, a[href], [role="button"], [role="menuitem"]'))) return null;
+        const candidates = videosIn(fullscreenElement() || document).filter(visible);
+        // A mouse binding targets the video under the pointer, never an unrelated
+        // playing video elsewhere on the page. Player overlays share its rectangle.
+        const direct = eventElements(event).find(node => candidates.includes(node));
+        if (direct) return direct;
+        return candidates.filter(video => {
+            const rect = video.getBoundingClientRect();
+            return event.clientX >= rect.left && event.clientX <= rect.right &&
+                event.clientY >= rect.top && event.clientY <= rect.bottom;
+        }).sort((a, b) => {
+            const aRect = a.getBoundingClientRect(), bRect = b.getBoundingClientRect();
+            return aRect.width * aRect.height - bRect.width * bRect.height;
+        })[0];
+    }
+    VideoControls.pointer.install({resolve, select: mouseTarget, execute, activate: video => {
+        // Bound mousedown events cancel native focus changes. Explicitly leave
+        // the previous input so subsequent keys control the selected video.
+        window.focus();
+        activeElement()?.blur();
+        video.focus({preventScroll: true});
+        preferredVideo = video;
+    }});
 
     // A fullscreen iframe does not expose its parent's fullscreenElement.
     // Propagate only the mode flag, and only between direct parent/child frames.
     function updateFrames() {
         const full = fullscreenElement();
-        for (const frame of document.querySelectorAll('iframe')) {
-            frame.contentWindow?.postMessage({videoControlsMode: true, fullscreen: Boolean(inheritedFullscreen || (full && (full === frame || full.contains(frame))))}, '*');
+        for (const frame of elementsIn(document, 'iframe')) {
+            frame.contentWindow?.postMessage({videoControlsMode: true, fullscreen: Boolean(inheritedFullscreen || (full && containsElement(full, frame)))}, '*');
         }
     }
     window.addEventListener('message', event => {
         if (event.source === parent && parent !== window && event.data?.videoControlsMode === true && typeof event.data.fullscreen === 'boolean') {
             inheritedFullscreen = event.data.fullscreen;
             updateFrames();
-        } else if (event.data?.videoControlsRequest === true && [...document.querySelectorAll('iframe')].some(frame => frame.contentWindow === event.source)) updateFrames();
+        } else if (event.data?.videoControlsRequest === true && elementsIn(document, 'iframe').some(frame => frame.contentWindow === event.source)) updateFrames();
     });
     document.addEventListener('fullscreenchange', updateFrames);
     document.addEventListener('webkitfullscreenchange', updateFrames);

@@ -14,7 +14,8 @@ textarea { box-sizing: border-box; width: 100%; resize: vertical; padding: 18px;
 .actions { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 24px; }
 button { padding: 12px 20px; font: inherit; cursor: pointer; border: 1px solid #8290a4; border-radius: 6px; }
 button[type=submit] { background: #2459b8; color: white; }
-button:disabled { opacity: .55; cursor: wait; }
+button:disabled { opacity: .55; cursor: default; }
+#status { margin: auto 0; }
 :focus-visible { outline: 3px solid #729eff; outline-offset: 3px; }
 section { border-top: 1px solid #8290a4; margin-top: 40px; }
 table { border-collapse: collapse; width: 100%; table-layout: fixed; }

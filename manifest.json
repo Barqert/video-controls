@@ -6,6 +6,15 @@
   "permissions": [
     "storage"
   ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "video-controls@amit.local",
+      "strict_min_version": "121.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  },
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true
@@ -14,7 +23,8 @@
     "default_title": "Video Controls settings"
   },
   "background": {
-    "service_worker": "src/background.js"
+    "service_worker": "src/background.js",
+    "scripts": ["src/background.js"]
   },
   "content_scripts": [
     {
@@ -25,6 +35,7 @@
         "src/config.js",
         "src/input.js",
         "src/engine.js",
+        "src/pointer.js",
         "src/content.js"
       ],
       "run_at": "document_end",
