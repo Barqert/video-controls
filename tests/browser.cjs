@@ -5,7 +5,8 @@ const {mkdtemp, rm} = require('node:fs/promises');
 const {tmpdir} = require('node:os');
 const path = require('node:path');
 const {chromium, firefox} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
-const root = path.resolve(__dirname, '..');
+// Also exercise an extracted release ZIP rather than only the working tree.
+const root = process.env.EXTENSION_PATH ? path.resolve(process.env.EXTENSION_PATH) : path.resolve(__dirname, '..');
 const fixture = `<!doctype html><title>Video fixture</title>
 <style>video { display:block; background:#333; } #large { width:400px;height:220px; } #small { width:120px;height:80px; }</style>
 <video id="large" style="transform:translateX(3px) !important;transform-origin:10px 20px"></video><video id="small"></video>
@@ -416,6 +417,196 @@ closedFixture.control.addEventListener('click', () => closedFixture.clicks++);
         await closedPage.keyboard.press('x');
         await frameInShadow.waitForFunction(() => document.querySelector('#large').playbackRate === 1.5);
         console.log('PASS fullscreen mode for iframe players nested inside closed roots');
+
+        await save({common: 'v set volume 75\nz add video-zoom 1\na set video-pan-x 1; set video-rotate 90\nr reset-all\ns no-osd set volume 40\ni ignore\nm cycle mute\nb multiply-decay speed 2 .1\nc no-osd set volume 60; set speed 1.25\nWHEEL_UP add volume 5',
+            fullscreen: '', windowed: ''});
+        const osdPage = await context.newPage();
+        await osdPage.goto(`${baseURL}/video`);
+        const notice = osdPage.locator('[data-video-controls-osd]').locator('[role="status"]');
+        const originalBox = await osdPage.locator('#large').boundingBox();
+        await osdPage.keyboard.press('v');
+        await notice.waitFor({state:'visible'});
+        assert.equal(await notice.textContent(), 'Volume: 75%');
+        const noticeBox = await notice.boundingBox();
+        assert.ok(Math.abs(noticeBox.x - originalBox.x - 12) < 1);
+        assert.ok(Math.abs(noticeBox.y - originalBox.y - 12) < 1);
+        assert.equal(await notice.evaluate(el => getComputedStyle(el).pointerEvents), 'none');
+        assert.equal(await osdPage.evaluate(() => document.activeElement === document.body), true);
+        await osdPage.keyboard.press('a');
+        assert.equal(await notice.textContent(), 'Pan X: 100%\nRotation: 90°');
+        await osdPage.keyboard.press('z');
+        assert.equal(await notice.textContent(), 'Zoom: 2×');
+        // The overlay stays readable in the original video box when its image moves.
+        const afterTransform = await notice.boundingBox();
+        assert.ok(Math.abs(afterTransform.x - noticeBox.x) < 1);
+        assert.ok(Math.abs(afterTransform.y - noticeBox.y) < 1);
+        await osdPage.keyboard.press('r');
+        assert.equal(await notice.textContent(), 'Picture reset');
+        await osdPage.keyboard.press('s');
+        assert.equal(await notice.count(), 0);
+        assert.equal(await osdPage.locator('#large').evaluate(el => el.volume), .4);
+        await osdPage.keyboard.press('i');
+        assert.equal(await notice.count(), 0);
+        await osdPage.keyboard.press('c');
+        assert.equal(await notice.textContent(), 'Speed: 1.25×');
+        await osdPage.locator('#large').hover();
+        await osdPage.mouse.wheel(0, -100);
+        await osdPage.waitForFunction(() => document.querySelector('[data-video-controls-osd]')?.shadowRoot.querySelector('[role="status"]').textContent === 'Volume: 65%');
+        await osdPage.keyboard.press('b');
+        await osdPage.waitForFunction(() => {
+            const text = document.querySelector('[data-video-controls-osd]')?.shadowRoot.querySelector('[role="status"]').textContent;
+            const speed = Number(text?.match(/Speed: ([\d.]+)/)?.[1]);
+            return speed > 1.25 && speed < 2;
+        });
+        await notice.waitFor({state:'detached', timeout:3000});
+
+        // Overlay styles survive hostile page rules, including popover backdrops.
+        await osdPage.addStyleTag({content:'div { color:red !important; font-size:1px !important; pointer-events:auto !important; } ::backdrop { background:red !important; }'});
+        await osdPage.keyboard.press('v');
+        assert.equal(await notice.evaluate(el => getComputedStyle(el).fontSize), '20px');
+        assert.equal(await notice.evaluate(el => getComputedStyle(el).color), 'rgb(255, 255, 255)');
+        await osdPage.locator('#large').evaluate(el => el.requestFullscreen());
+        await osdPage.waitForFunction(() => Boolean(document.fullscreenElement));
+        await osdPage.keyboard.press('m');
+        assert.equal(await notice.textContent(), 'Mute: on');
+        assert.equal(await notice.evaluate(el => el.matches(':popover-open')), true);
+        assert.equal(await notice.evaluate(el => getComputedStyle(el, '::backdrop').backgroundColor), 'rgba(0, 0, 0, 0)');
+        await osdPage.evaluate(() => document.exitFullscreen());
+        await osdPage.locator('#large').evaluate(el => el.remove());
+        await notice.waitFor({state:'detached'});
+
+        // A closed-root video receives the same top-layer feedback.
+        await closedPage.keyboard.press('v');
+        const closedNotice = closedPage.locator('[data-video-controls-osd]').locator('[role="status"]');
+        // Focus is still in the nested iframe; its own document owns the overlay.
+        const frameNotice = frameInShadow.locator('[data-video-controls-osd]').locator('[role="status"]');
+        assert.equal(await frameNotice.textContent(), 'Volume: 75%');
+        await closedPage.evaluate(() => closedFixture.large.focus());
+        await closedPage.keyboard.press('v');
+        assert.equal(await closedNotice.textContent(), 'Volume: 75%');
+        console.log('PASS property OSD, stable positioning, no-osd/chains, wheel/decay, timeout, fullscreen, shadow roots, and cleanup');
+
+        await save({common: 'RIGHT multiply-decay speed 3 1\np cycle pause', fullscreen: '', windowed: ''});
+        const playbackPage = await context.newPage();
+        await playbackPage.goto(`${baseURL}/video`);
+        await playbackPage.locator('#large').evaluate(async video => {
+            // A minute of silent PCM gives both browsers real, seekable playback
+            // without a network media dependency or mocked play/pause properties.
+            const data = new Uint8Array(44 + 8000 * 60);
+            const header = new DataView(data.buffer);
+            const text = (offset, value) => [...value].forEach((char, i) => { data[offset + i] = char.charCodeAt(0); });
+            text(0, 'RIFF'); header.setUint32(4, data.length - 8, true);
+            text(8, 'WAVE'); text(12, 'fmt '); header.setUint32(16, 16, true);
+            header.setUint16(20, 1, true); header.setUint16(22, 1, true);
+            header.setUint32(24, 8000, true); header.setUint32(28, 8000, true);
+            header.setUint16(32, 1, true); header.setUint16(34, 8, true);
+            text(36, 'data'); header.setUint32(40, data.length - 44, true);
+            data.fill(128, 44);
+            video.src = URL.createObjectURL(new Blob([data], {type: 'audio/wav'}));
+            video.muted = true;
+            video.loop = true;
+            await video.play();
+        });
+        await playbackPage.keyboard.press('ArrowRight');
+        await playbackPage.locator('#large').evaluate(video => video.pause());
+        // Observe an actual decay tick while paused, then resume through the site.
+        // The next boost must not reapply that earlier paused state.
+        const pausedRate = await playbackPage.locator('#large').evaluate(video => video.playbackRate);
+        await playbackPage.waitForFunction(rate => document.querySelector('#large').playbackRate < rate, pausedRate);
+        await playbackPage.locator('#large').evaluate(video => video.play());
+        await playbackPage.keyboard.press('ArrowRight');
+        assert.equal(await playbackPage.locator('#large').evaluate(video => video.paused), false,
+            'A speed boost must not pause a video resumed through site controls');
+        // Explicit pause shortcuts must still work, and boosting a paused video
+        // must leave it paused rather than silently resume it.
+        await playbackPage.keyboard.press('p');
+        assert.equal(await playbackPage.locator('#large').evaluate(video => video.paused), true);
+        await playbackPage.keyboard.press('ArrowRight');
+        assert.equal(await playbackPage.locator('#large').evaluate(video => video.paused), true);
+        await playbackPage.keyboard.press('p');
+        assert.equal(await playbackPage.locator('#large').evaluate(video => video.paused), false);
+        // Check the inverse transition, with a paused state at the last shortcut.
+        await playbackPage.keyboard.press('p');
+        await playbackPage.locator('#large').evaluate(video => video.play());
+        const resumedRate = await playbackPage.locator('#large').evaluate(video => video.playbackRate);
+        await playbackPage.waitForFunction(rate => document.querySelector('#large').playbackRate < rate, resumedRate);
+        await playbackPage.locator('#large').evaluate(video => video.pause());
+        await playbackPage.keyboard.press('ArrowRight');
+        assert.equal(await playbackPage.locator('#large').evaluate(video => video.paused), true,
+            'A speed boost must not resume a video paused through site controls');
+        console.log('PASS speed boosts preserve site playback changes and explicit pause shortcuts');
+
+        await save({common: 'RIGHT multiply-decay speed 3 1\np cycle pause\nh set speed 32\nn set speed 1\nb set speed 8; multiply-decay speed 4 .25',
+            fullscreen: '', windowed: ''});
+        await playbackPage.bringToFront();
+        await playbackPage.keyboard.press('n');
+        await playbackPage.locator('#large').evaluate(async video => {
+            video.loop = false;
+            video.currentTime = 0;
+            await video.play();
+        });
+        await playbackPage.waitForFunction(() => {
+            const video = document.querySelector('#large');
+            return video.seekable.length && !video.seeking && video.readyState >= 3;
+        });
+        await playbackPage.locator('#large').evaluate(video => {
+            window.highSpeedSeeks = 0;
+            video.addEventListener('seeking', () => window.highSpeedSeeks++);
+            window.highSpeedStart = {time: video.currentTime, clock: performance.now()};
+        });
+        await playbackPage.keyboard.press('h');
+        const speedNotice = playbackPage.locator('[data-video-controls-osd]').locator('[role="status"]');
+        assert.equal(await speedNotice.textContent(), 'Speed: 32×');
+        await playbackPage.waitForFunction(() => window.highSpeedSeeks >= 3);
+        const fast = await playbackPage.locator('#large').evaluate(video => ({
+            native: video.playbackRate,
+            effective: (video.currentTime - highSpeedStart.time) / ((performance.now() - highSpeedStart.clock) / 1000)
+        }));
+        assert.equal(fast.native, 16);
+        assert.ok(fast.effective > 16, `Expected seeks to exceed native playback, got ${fast.effective}×`);
+        await playbackPage.keyboard.press('p');
+        await playbackPage.waitForFunction(() => !document.querySelector('#large').seeking);
+        const pausedTime = await playbackPage.locator('#large').evaluate(video => video.currentTime);
+        await playbackPage.waitForTimeout(250);
+        assert.equal(await playbackPage.locator('#large').evaluate(video => video.currentTime), pausedTime);
+        const pausedSeeks = await playbackPage.evaluate(() => highSpeedSeeks);
+        await playbackPage.keyboard.press('p');
+        await playbackPage.waitForFunction(count => highSpeedSeeks > count, pausedSeeks);
+
+        // Site speed changes take ownership and cancel seek emulation too.
+        await playbackPage.locator('#large').evaluate(video => { video.playbackRate = 2; });
+        await playbackPage.waitForTimeout(100);
+        const externalSeeks = await playbackPage.evaluate(() => highSpeedSeeks);
+        await playbackPage.waitForTimeout(250);
+        assert.equal(await playbackPage.evaluate(() => highSpeedSeeks), externalSeeks);
+        assert.equal(await playbackPage.locator('#large').evaluate(video => video.playbackRate), 2);
+
+        // A decaying high rate crosses back into native playback automatically.
+        await playbackPage.locator('#large').evaluate(video => { video.currentTime = 0; });
+        await playbackPage.waitForFunction(() => !document.querySelector('#large').seeking);
+        const decaySeeks = await playbackPage.evaluate(() => highSpeedSeeks);
+        await playbackPage.keyboard.press('b');
+        await playbackPage.waitForFunction(count => highSpeedSeeks > count, decaySeeks);
+        await playbackPage.waitForFunction(() => document.querySelector('#large').playbackRate < 16);
+        await playbackPage.waitForTimeout(100);
+        const nativeSeeks = await playbackPage.evaluate(() => highSpeedSeeks);
+        await playbackPage.waitForFunction(() => document.querySelector('#large').playbackRate === 8);
+        assert.equal(await playbackPage.evaluate(() => highSpeedSeeks), nativeSeeks);
+        await playbackPage.keyboard.press('n');
+        const combined = await playbackPage.evaluate(() => {
+            for (let i = 0; i < 3; i++) document.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowRight', code: 'ArrowRight', bubbles: true}));
+            return {native: document.querySelector('#large').playbackRate,
+                text: document.querySelector('[data-video-controls-osd]').shadowRoot.querySelector('[role="status"]').textContent};
+        });
+        assert.equal(combined.native, 16);
+        const logicalSpeed = Number(combined.text.match(/Speed: ([\d.]+)/)[1]);
+        assert.ok(logicalSpeed > 26 && logicalSpeed <= 27);
+        // Reaching the end must stop normally, with no out-of-range seek or restart.
+        await playbackPage.keyboard.press('h');
+        await playbackPage.locator('#large').evaluate(video => { video.currentTime = video.duration - 1; });
+        await playbackPage.waitForFunction(() => document.querySelector('#large').ended);
+        assert.equal(await playbackPage.locator('#large').evaluate(video => video.currentTime), 60);
+        console.log('PASS seek-based high speed, logical OSD, pause/resume, site overrides, decay, stacking, and media end');
         assert.deepEqual(errors, []);
     } finally {
         await context?.close();

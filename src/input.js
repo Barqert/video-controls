@@ -120,9 +120,11 @@
         parts = [...parts];
         let repeat;
         let scalable = true;
+        let osd = true;
         while (['repeatable', 'nonrepeatable', 'no-osd', 'nonscalable'].includes(parts[0])) {
             const prefix = parts.shift();
             if (prefix === 'nonscalable') scalable = false;
+            if (prefix === 'no-osd') osd = false;
             if (prefix === 'repeatable' || prefix === 'nonrepeatable') repeat = prefix === 'repeatable';
         }
         const op = parts.shift();
@@ -153,7 +155,7 @@
         // Normalize numeric arguments once so every executor uses the same syntax.
         const normalizedArgs = numeric.includes(property) ? args.map(value => String(number(value))) : args;
         return {op, property: op === 'seek' ? String(number(property)) : property,
-            args: normalizedArgs, reverse, scalable, repeat: repeat ?? ['add', 'multiply', 'seek'].includes(op)};
+            args: normalizedArgs, reverse, scalable, osd, repeat: repeat ?? ['add', 'multiply', 'seek'].includes(op)};
     }
     function parse(text) {
         const bindings = [], errors = [];

@@ -5,6 +5,8 @@
   "description": "Standalone mpv-style web video controls",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "test:browser": "node tests/browser.cjs"
+    "test:browser": "node tests/browser.cjs",
+    "lint": "web-ext lint",
+    "package": "npm test && npm run lint && web-ext build"
   }
 }

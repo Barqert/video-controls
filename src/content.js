@@ -1,7 +1,7 @@
 // Adapt the shared input/animation engine to videos in this document or frame.
 (() => {
     'use strict';
-    const {config, input, engine} = VideoControls;
+    const {config, input, engine, playback} = VideoControls;
     const states = new Map();
     let bindings, preferredVideo, inheritedFullscreen = false, animation = null, storageRevision = 0;
     function shadowRoot(element) {
@@ -22,6 +22,25 @@
         return element;
     }
     const isFullscreen = () => Boolean(fullscreenElement() || inheritedFullscreen);
+    const osd = VideoControls.osd.create({fullscreenElement, viewRect(video) {
+        const originals = states.get(video)?.originals;
+        if (!originals) return video.getBoundingClientRect();
+        // Measure the site's original video box, so pan, zoom, and rotation do
+        // not move the feedback. Restore our styles synchronously before paint.
+        const current = {};
+        for (const [name, [value, priority]] of Object.entries(originals)) {
+            current[name] = [video.style.getPropertyValue(name), video.style.getPropertyPriority(name)];
+            if (value) video.style.setProperty(name, value, priority);
+            else video.style.removeProperty(name);
+        }
+        try { return video.getBoundingClientRect(); }
+        finally {
+            for (const [name, [value, priority]] of Object.entries(current)) {
+                if (value) video.style.setProperty(name, value, priority);
+                else video.style.removeProperty(name);
+            }
+        }
+    }});
     function load(raw) {
         const parsed = {};
         for (const name of Object.keys(config.defaults)) {
@@ -115,7 +134,7 @@
         if (!states.has(video)) {
             states.set(video, {
                 model: engine.create({speed: video.playbackRate, volume: video.volume * 100, pause: video.paused, mute: video.muted}),
-                originals: null, last: {}
+                originals: null, last: {}, playback: playback.create(video)
             });
             observeVideoRoots();
         }
@@ -169,6 +188,10 @@
         for (const [name, value] of Object.entries({speed: video.playbackRate, volume: video.volume * 100, pause: video.paused, mute: video.muted})) {
             // A site's player controls take ownership if they change the actual value.
             if (state.last[name] === undefined || Math.abs(state.last[name] - value) > 1e-8) engine.set(state.model, name, value);
+            // Remember adopted changes too: pause is not written by render().
+            // Otherwise a pause/resume during decay can leave the model stale
+            // when playback returns to the value seen at the last shortcut.
+            state.last[name] = value;
         }
     }
     function render(video, state, now) {
@@ -189,7 +212,8 @@
             // Keep flips inside translation so they do not reverse pan direction.
             video.style.setProperty('transform', `scale(${scale}) translate(${values['video-pan-x'] * 100}%, ${values['video-pan-y'] * 100}%) rotate(${values['video-rotate']}deg) scale(${m.flipX ? -1 : 1}, ${m.flipY ? -1 : 1})${state.baseTransform}`, 'important');
         }
-        for (const [property, name, desired] of [['playbackRate', 'speed', values.speed], ['volume', 'volume', values.volume / 100], ['muted', 'mute', m.base.mute]]) {
+        // Keep the logical speed in the model; only the native media rate is capped.
+        for (const [property, name, desired] of [['playbackRate', 'speed', Math.min(values.speed, playback.nativeLimit)], ['volume', 'volume', values.volume / 100], ['muted', 'mute', m.base.mute]]) {
             if (video[property] !== desired) {
                 try { video[property] = desired; }
                 catch (error) {
@@ -199,6 +223,7 @@
             }
             state.last[name] = name === 'volume' ? video[property] * 100 : video[property];
         }
+        state.playback.update(engine.value(m, 'speed', now), now);
         const delay = values['audio-delay'];
         if (Math.abs(delay - (audioGraphs.get(video)?.delay.delayTime.value ?? 0)) > 1e-6) {
             try { audioGraph(video).delay.delayTime.value = delay; }
@@ -207,13 +232,18 @@
                 console.warn('Video Controls: cannot delay audio', error);
             }
         }
+        // Decaying effects update the displayed value without extending its lifetime.
+        osd.refresh(video);
     }
     function cleanup(video, state) {
+        osd.hide(video);
+        state.playback.dispose();
         restoreStyle(video, state);
         // Detached videos must not retain a temporary media boost when reused.
         for (const [name, property] of [['speed', 'playbackRate'], ['volume', 'volume']]) {
             if (state.model.effects[name]?.length) {
-                try { video[property] = state.model.base[name] / (name === 'volume' ? 100 : 1); } catch { /* The media element may already be torn down. */ }
+                const base = name === 'speed' ? Math.min(state.model.base.speed, playback.nativeLimit) : state.model.base.volume / 100;
+                try { video[property] = base; } catch { /* The media element may already be torn down. */ }
             }
         }
         // A reattached video starts with fresh state, so its routing must be neutral too.
@@ -222,11 +252,13 @@
         states.delete(video);
         observeVideoRoots();
     }
+    // A fixed high speed needs the same animation loop even without decay effects.
+    const needsTicks = state => engine.active(state.model) || state.model.base.speed > playback.nativeLimit;
     function tick(now) {
         animation = null;
         for (const [video, state] of states) {
             if (!video.isConnected) cleanup(video, state);
-            else if (engine.active(state.model)) {
+            else if (needsTicks(state)) {
                 syncMedia(video, state);
                 render(video, state, now);
             }
@@ -234,7 +266,7 @@
         schedule();
     }
     function schedule() {
-        if (animation === null && [...states.values()].some(state => engine.active(state.model))) animation = requestAnimationFrame(tick);
+        if (animation === null && [...states.values()].some(needsTicks)) animation = requestAnimationFrame(tick);
     }
     const removalObserver = new MutationObserver(() => {
         for (const [video, state] of states) if (!video.isConnected) cleanup(video, state);
@@ -275,11 +307,17 @@
         preferredVideo = video;
         const state = stateFor(video), now = performance.now();
         syncMedia(video, state);
+        const feedback = new Map();
         for (const original of binding.commands) {
             const cmd = input.scaleCommand(original, scale);
             try {
                 if (cmd.op === 'seek') seek(video, cmd);
                 else engine.execute(state.model, cmd, now);
+                // A chain shows each affected property once. The last command
+                // for a property decides whether that property's feedback is muted.
+                const key = cmd.op === 'ignore' ? null : cmd.op === 'reset-all' ? 'reset' :
+                    cmd.op === 'seek' ? 'position' : cmd.op === 'vf' ? (cmd.args[0] === 'hflip' ? 'flipX' : 'flipY') : cmd.property;
+                if (key) feedback.set(key, cmd.osd);
             } catch (error) { console.warn('Video Controls: command failed', error); }
         }
         if (state.model.base.pause !== video.paused) {
@@ -289,6 +327,15 @@
         state.last.pause = video.paused;
         render(video, state, now);
         schedule();
+        const keys = [...feedback].filter(([, enabled]) => enabled).map(([key]) => key);
+        if (keys.length) osd.show(video, () => {
+            // Speed includes emulated seeks; other media values reflect what the
+            // browser actually applied, including clamping or rejected play().
+            const actual = {speed: engine.value(state.model, 'speed', performance.now()), volume: video.volume * 100, mute: video.muted,
+                pause: video.paused, position: video.currentTime, flipX: state.model.flipX, flipY: state.model.flipY, reset: true};
+            return Object.fromEntries(keys.map(key => [key, key in actual ? actual[key] : engine.value(state.model, key, performance.now())]));
+        });
+        else if (feedback.size) osd.hide(video);
     }
     const resolve = event => input.resolve(bindings, isFullscreen(), event);
     document.addEventListener('keydown', event => {

@@ -8,6 +8,11 @@ RIGHT    multiply-decay speed 3 1
 UP    seek  60
 DOWN  seek -60
 
+[ multiply speed 1/1.1 
+] multiply speed 1.1
+{ multiply speed 0.5
+} multiply speed 2.0
+
 Alt+left  add video-pan-x -0.02
 Alt+right add video-pan-x  0.02
 Alt+up    add video-pan-y -0.02

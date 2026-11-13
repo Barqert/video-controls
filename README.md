@@ -17,12 +17,31 @@ The previous fullscreen shortcuts are the Common defaults, available in both mod
 
 `multiply-decay PROPERTY X Y` adds a temporary multiplicative effect; Y is its half-life in seconds. Effects compose multiplicatively over a shared baseline. `reset-all` restores transforms and clears transform effects.
 
+Speeds above 16× use native playback at 16× plus forward seeks about every 100 ms for the remaining speed. For example, `set speed 32` adds roughly 1.6 seconds of seeking per step. This also works with overlapping `multiply-decay` effects and returns to native playback as they fall below 16×. The overlay shows the target speed; actual progress depends on buffering and seek performance, with skipped picture and sound. Pauses, buffering, manual seeks, and long gaps between animation frames discard pending skips. Seeks stay within the available media ranges; non-seekable streams remain at native speed.
+
+Property shortcuts show brief text feedback at the video's top-left corner. It stays in the original viewing area when the picture is moved, zoomed, rotated, or flipped, and disappears after 1.5 seconds. Temporary effects update the value while the text is visible. Prefix a command with `no-osd` to suppress its feedback, for example `UP no-osd add volume 5`. In command chains, the prefix applies only to its own command. Feedback also covers seeking, flips, and picture reset. The floating text ignores clicks and does not take keyboard focus. Native video fullscreen feedback needs the Popover API (available in current Chromium and Firefox); older browsers still get ordinary-page and fullscreen-container feedback.
+
+## Release packaging
+
+Install [Mozilla's web-ext](https://extensionworkshop.com/documentation/develop/web-ext-command-reference/) globally once with `npm install -g web-ext@10.6.0` (tested with Node.js 22). There are no project-local npm dependencies, and Python is not required. `web-ext` must be on your `PATH`; check with `web-ext --version`.
+
+Run `npm run package` from this directory. It runs the core tests and `web-ext lint`, then uses `web-ext build` to create **`dist/video-controls-1.0.0.zip`**, using the version in `manifest.json`. Run `npm run lint` for validation alone. The shared manifest currently produces four compatibility warnings: Chromium's service worker and guarded shadow-root API are unused on Firefox, and the no-data-collection declaration is newer than our minimum Firefox versions. These are expected; lint errors stop packaging. Before a new release, update the version in both `manifest.json` and `package.json`; the web-ext config rejects mismatches.
+
+Upload the **same ZIP** to the [Chrome Web Store](https://developer.chrome.com/docs/webstore/publish) and [Mozilla Add-ons](https://extensionworkshop.com/documentation/publish/package-your-extension/). The shared manifest supports Chrome/Chromium and Firefox 121+: Chromium uses `background.service_worker`; Firefox uses `background.scripts`. The archive has `manifest.json` at its root and contains only the explicitly listed runtime files in `web-ext-config.cjs`. JavaScript, HTML, CSS, and the manifest are copied unchanged. Tests, Git files, tooling, and local files are excluded. Update that allowlist when adding runtime files. ZIP metadata is managed by web-ext; byte-for-byte reproducibility is not guaranteed.
+
+The ZIP is an upload package, not a signed installer. Mozilla signs Firefox releases; use its returned signed XPI for direct distribution (choose unlisted distribution on AMO for that). Chrome Web Store handles Chromium distribution and signing. Store listing assets and metadata are entered separately in each store. Packaging does not upload or publish anything. There is no minification or code generation, so this process does not require a separate source archive.
+
+To test the release itself, extract the ZIP into a temporary directory and use `EXTENSION_PATH=/path/to/extracted npm run test:browser`, adding `BROWSER=firefox` for Firefox and the Playwright environment variables described below. Browser integration tests are separate from `npm run package` because they require Playwright and installed browsers.
+
 ## Structure
 
+- `icons/`: original mpv-inspired SVG and PNG icons at 16, 32, 48, 64, and 128 pixels. To update the PNGs after editing the SVG, run `bash scripts/render-icons.sh` with Inkscape installed; normal use and packaging need no icon tools.
 - `src/config.js`: shared default configurations.
 - `src/input.js`: parsing, validation, keyboard/mouse names, wheel scaling, and mode precedence.
 - `src/pointer.js`: mouse gestures, double clicks, wheel events, and suppression of bound page actions.
+- `src/osd.js`: property labels and temporary on-screen feedback.
 - `src/engine.js`: pure property arithmetic and independently decaying effects.
+- `src/playback.js`: forward-seek emulation for speeds above native playback limits.
 - `src/content.js`: video selection, page styles, playback, fullscreen frames, and animation.
 - `src/options.js`, `options.html`, `options.css`: settings and syntax reference.
 - `src/background.js`: toolbar settings shortcut.

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 require('../src/config.js');
 require('../src/input.js');
 require('../src/engine.js');
+require('../src/osd.js');
 const {input, engine, config} = globalThis.VideoControls;
 const command = text => input.command(input.tokenize(text)[0]);
 const run = (state, text, time = 0) => engine.execute(state, command(text), time);
@@ -69,6 +70,19 @@ test('repeat behavior and no-osd prefix', () => {
     assert.equal(command('repeatable multiply-decay speed 2 1').repeat, true);
     assert.equal(command('nonrepeatable add speed 1').repeat, false);
     assert.equal(command('no-osd add speed').repeat, true);
+    assert.equal(command('no-osd add speed').osd, false);
+    assert.equal(command('add speed').osd, true);
+    const chain = input.parse('a no-osd add volume 5; cycle mute').bindings[0].commands;
+    assert.equal(chain[0].osd, false);
+    assert.equal(chain[1].osd, true);
+    assert.equal(input.scaleCommand(chain[0], .5).osd, false);
+});
+test('OSD labels show useful units and avoid floating-point noise', () => {
+    assert.equal(VideoControls.osd.describe({speed: 1.2500000001, volume: 75, 'video-pan-x': -.005,
+        'video-zoom': 1, 'video-rotate': 90, 'audio-delay': .1}),
+    'Speed: 1.25×\nVolume: 75%\nPan X: -0.5%\nZoom: 2×\nRotation: 90°\nAudio delay: 0.1 s');
+    assert.equal(VideoControls.osd.describe({mute: false, pause: true, flipX: true, flipY: false, position: 65.9, reset: true}),
+        'Mute: off\nPaused\nHorizontal flip: on\nVertical flip: off\nPosition: 1:05\nPicture reset');
 });
 test('numeric, boolean, reverse cycles, flips and reset', () => {
     const state = engine.create();
@@ -117,6 +131,18 @@ test('property limits do not corrupt the baseline beneath a boost', () => {
     near(engine.value(state, 'volume', 0), 100);
     near(engine.value(state, 'volume', 3000), 90);
     near(engine.value(state, 'volume', 20000), 80);
+});
+test('speed arithmetic and overlapping boosts can exceed the native 16× limit', () => {
+    const state = engine.create();
+    for (let i = 0; i < 3; i++) run(state, 'multiply-decay speed 3 1');
+    near(engine.value(state, 'speed', 0), 27);
+    near(engine.value(state, 'speed', 1000), 8);
+    near(engine.value(state, 'speed', 20000), 1);
+    run(state, 'set speed 32');
+    run(state, 'multiply speed 2');
+    near(engine.value(state, 'speed', 20000), 64);
+    run(state, 'multiply speed 1e308');
+    assert.equal(state.base.speed, Number.MAX_VALUE);
 });
 test('extreme reciprocal multipliers remain finite and cancel at their start time', () => {
     const state = engine.create();

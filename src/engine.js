@@ -3,7 +3,8 @@
     'use strict';
     const defaults = {'video-pan-x': 0, 'video-pan-y': 0, 'video-zoom': 0, 'video-rotate': 0, speed: 1, volume: 100, 'audio-delay': 0, pause: true, mute: false};
     const clamp = (property, value) => {
-        const limits = {speed: [0.0625, 16], volume: [0, 100], 'video-zoom': [-10, 10], 'video-pan-x': [-100, 100], 'video-pan-y': [-100, 100], 'video-rotate': [-360000, 360000], 'audio-delay': [0, 10]};
+        // Speed is a logical rate; the media adapter emulates rates above 16×.
+        const limits = {speed: [0.0625, Number.MAX_VALUE], volume: [0, 100], 'video-zoom': [-10, 10], 'video-pan-x': [-100, 100], 'video-pan-y': [-100, 100], 'video-rotate': [-360000, 360000], 'audio-delay': [0, 10]};
         const [min, max] = limits[property] || [-Number.MAX_VALUE, Number.MAX_VALUE];
         return Math.min(max, Math.max(min, value));
     };

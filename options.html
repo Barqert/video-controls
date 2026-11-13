@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Video Controls — Settings</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
   <link rel="stylesheet" href="options.css">
   <script defer src="src/config.js"></script>
   <script defer src="src/input.js"></script>
@@ -40,6 +41,12 @@
       <code>video-rotate</code>, <code>speed</code>, <code>volume</code>, <code>audio-delay</code> (positive only),
       <code>pause</code>, <code>mute</code>.
     </p>
+    <p>Shortcuts briefly show the new value at the video's top-left corner. To keep a command quiet,
+      add <code>no-osd</code> before it, for example <code>UP no-osd add volume 5</code>.</p>
+    <p>Speeds above 16× play at 16× and skip forward in small steps to make up the difference.
+      This also works with <code>multiply-decay</code>. The displayed speed is the target:
+      playback will be jumpy, and buffering can make it slower. Skipping stops while paused or buffering.
+      Videos that cannot seek stay at 16×.</p>
 
     <h2>Extra commands added by this extension</h2>
     <table>
